@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
+from collections import defaultdict
 
 def fillMissingValuesWithMean(data, featureLength):
     """Fill all the missing values with mean values """
@@ -61,23 +61,69 @@ def calculate_min_max_normalization(data, index):
 
 def normalization(data):
     """Normalize the data by calling the normalization function"""
-    for i in range(featureLength):
-        if is_binary_column_without_nan(data,i):
-            continue
-        data = calculate_min_max_normalization(data,i)
-    return data
+    normalized_data = data.copy()
 
+    for i in range(featureLength):
+        if is_binary_column_without_nan(normalized_data, i):
+            continue
+        normalized_data = calculate_min_max_normalization(normalized_data, i)
+    return normalized_data
+
+
+def train_naive_bayes(X_train, y_train):
+    """Naive Bayes modelini eğitim verisi ile oluştur"""
+    class_probabilities = defaultdict(float)
+    total_samples = len(y_train)
+
+    for class_label in set(y_train):
+        class_probabilities[class_label] = sum(y_train == class_label) / total_samples
+
+    feature_probabilities = defaultdict(dict)
+
+    for feature in X_train.columns:
+        for class_label in set(y_train):
+            feature_probabilities[feature][class_label] = (
+                sum((X_train[feature] == 1) & (y_train == class_label)) + 1
+            ) / (sum(y_train == class_label) + 2)
+
+    return {"class_probabilities": class_probabilities, "feature_probabilities": feature_probabilities}
+
+def predict_naive_bayes(X_test, model):
+    """Naive Bayes modeli ile test verisi üzerinde tahmin yap"""
+    predictions = []
+
+    for _, row in X_test.iterrows():
+        class_scores = defaultdict(float)
+
+        for class_label, class_probability in model["class_probabilities"].items():
+            feature_score = 0
+
+            for feature, value in row.items():
+                feature_score += model["feature_probabilities"][feature][class_label] if value == 1 else 1 - model["feature_probabilities"][feature][class_label]
+
+            class_scores[class_label] = feature_score + class_probability
+
+        predicted_class = max(class_scores, key=class_scores.get)
+        predictions.append(predicted_class)
+
+    return predictions
+
+def calculate_accuracy(y_true, y_pred):
+    """Doğruluk (accuracy) ölçümünü hesapla"""
+    correct_predictions = sum(y_true == y_pred)
+    total_samples = len(y_true)
+    accuracy = correct_predictions / total_samples
+    return accuracy
 
 def kfold_cross_validation(data, k=5):
     """Kfold cross validation"""
 
-    X = data.iloc[:, :-2]
-    y = data.iloc[:, -2]
+    X = data.iloc[:, :-1]
+    y = data.iloc[:, -1]
 
     data_length = len(data)
 
     fold_size = data_length // k
-
     accuracies = []
 
     for i in range(k):
@@ -88,15 +134,25 @@ def kfold_cross_validation(data, k=5):
         test_indices = range(fold_start, fold_end)
         train_indices = [j for j in range(data_length) if j not in test_indices]
 
-        X_train = X.iloc[train_indices, :]
-        y_train = y.iloc[train_indices]
-        X_test = X.iloc[test_indices, :]
-        y_test = y.iloc[test_indices]
+        X_train, X_test = X.iloc[train_indices, :], X.iloc[test_indices, :]
+        y_train, y_test = y.iloc[train_indices], y.iloc[test_indices]
+        print(X_train)
+        trainModel = train_naive_bayes(X_train, y_train)
+        prediction = predict_naive_bayes(X_test, trainModel)
+        accuracy = calculate_accuracy(y_test, prediction)
+        accuracies.append(accuracy)
+    return accuracies
 
-        print(len(X_train),len(y_train))
+
+
+
+
+
 
 
 path = './card_transdata.xlsx'
+#path = './veriler.xlsx'
+#path = './card_transdata.xlsx'
 
 dataset = pd.read_excel(path, sheet_name="card_transdata")
 
@@ -108,6 +164,25 @@ dataWithoutNormalization = fillMissingValuesWithMean(dataset, featureLength)
 
 dataWithNormalization = normalization(dataWithoutNormalization)
 
-kfold_cross_validation(dataWithoutNormalization, 5)
+accuracyWithoutNormalization = kfold_cross_validation(dataWithoutNormalization, 5)
+
+accuracyWithNormalization = kfold_cross_validation(dataWithNormalization, 5)
+
+print("Accuracy without Normalization:",accuracyWithoutNormalization)
+
+print("Accuracy with Normalization:",accuracyWithNormalization)
 
 
+# Grafik için doğruluk oranlarını ayarla
+methods = ['Normalization Before'] * len(accuracyWithoutNormalization) + ['Normalization After'] * len(accuracyWithNormalization)
+accuracies = accuracyWithoutNormalization + accuracyWithNormalization
+
+plt.bar(methods, accuracies, color=['blue', 'green'])
+
+# Grafik başlığı ve etiketleri ekle
+plt.title('Naive Bayes Çapraz Doğrulama Sonuçları')
+plt.xlabel('Normalleştirme Yöntemi')
+plt.ylabel('Doğruluk Oranı')
+
+# Grafiği göster
+plt.show()
